@@ -40,17 +40,25 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.PowerManager;
+import android.os.StatFs;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.provider.Telephony;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresPermission;
+
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
+
 import androidx.core.content.FileProvider;
+
 import android.telephony.TelephonyManager;
 import android.text.Html;
 import android.text.Layout;
+import android.text.TextUtils;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -95,6 +103,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Array;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -675,8 +686,7 @@ public class UtilsLib {
             md.update(text.getBytes("iso-8859-1"), 0, text.length());
             byte[] sha1hash = md.digest();
             result = convertToHex(sha1hash);
-        } catch (NoSuchAlgorithmException ignored) {
-        } catch (UnsupportedEncodingException ignored) {
+        } catch (NoSuchAlgorithmException | UnsupportedEncodingException ignored) {
         }
         return result;
     }
@@ -1370,7 +1380,7 @@ public class UtilsLib {
 
         // See if official Facebook app is found
         boolean facebookAppFound = false;
-        List<ResolveInfo> matches = context.getPackageManager().queryIntentActivities(intent, 0);
+        @SuppressLint("QueryPermissionsNeeded") List<ResolveInfo> matches = context.getPackageManager().queryIntentActivities(intent, 0);
         for (ResolveInfo info : matches) {
             if (info.activityInfo.packageName.toLowerCase().startsWith("com.facebook.katana")) {
                 intent.setPackage(info.activityInfo.packageName);
@@ -1752,8 +1762,8 @@ public class UtilsLib {
         if (!sdCardInfoList.isEmpty()) {
             List<String> storagePaths = new ArrayList<>();
             storagePaths.add(internalStorage.getAbsolutePath());
-            for (SDCardInfo sdCardInfo: sdCardInfoList) {
-                storagePaths.add(sdCardInfo.path);
+            for (SDCardInfo sdCardInfo : sdCardInfoList) {
+                storagePaths.add(sdCardInfo.getPath());
             }
             paths = storagePaths.toArray(new String[0]);
         } else {
@@ -1766,7 +1776,7 @@ public class UtilsLib {
                 DebugLog.logd("Scanned " + path);
                 mCountResultScanMedia++;
                 if (mCountResultScanMedia == paths.length && listener != null) {
-                    if (context != null && context instanceof Activity) {
+                    if (context instanceof Activity) {
                         ((Activity) context).runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
@@ -1786,5 +1796,83 @@ public class UtilsLib {
 
         void scanCompleted();
     }
+
+    public static long getFsTotalSize(String anyPathInFs) {
+        if (TextUtils.isEmpty(anyPathInFs)) return 0;
+        StatFs statFs = new StatFs(anyPathInFs);
+        long blockSize;
+        long totalSize;
+        blockSize = statFs.getBlockSizeLong();
+        totalSize = statFs.getBlockCountLong();
+        return blockSize * totalSize;
+    }
+
+    /**
+     * Return the available size of file system.
+     *
+     * @param anyPathInFs Any path in file system.
+     * @return the available size of file system
+     */
+    public static long getFsAvailableSize(final String anyPathInFs) {
+        if (TextUtils.isEmpty(anyPathInFs)) return 0;
+        StatFs statFs = new StatFs(anyPathInFs);
+        long blockSize;
+        long availableSize;
+        blockSize = statFs.getBlockSizeLong();
+        availableSize = statFs.getAvailableBlocksLong();
+        return blockSize * availableSize;
+    }
+
+
+    /**
+     * Return the information of sdcard.
+     *
+     * @return the information of sdcard
+     */
+    public static List<SDCardInfo> getSDCardInfo(Context context) {
+        List<SDCardInfo> paths = new ArrayList<>();
+        StorageManager sm = (StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
+        if (sm == null) return paths;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            List<StorageVolume> storageVolumes = sm.getStorageVolumes();
+            try {
+                //noinspection JavaReflectionMemberAccess
+                Method getPathMethod = StorageVolume.class.getMethod("getPath");
+                for (StorageVolume storageVolume : storageVolumes) {
+                    boolean isRemovable = storageVolume.isRemovable();
+                    String state = storageVolume.getState();
+                    String path = (String) getPathMethod.invoke(storageVolume);
+                    paths.add(new SDCardInfo(path, new File(path).getName(), state, isRemovable));
+                }
+            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+                e.printStackTrace();
+            }
+        } else {
+            try {
+                Class<?> storageVolumeClazz = Class.forName("android.os.storage.StorageVolume");
+                //noinspection JavaReflectionMemberAccess
+                Method getPathMethod = storageVolumeClazz.getMethod("getPath");
+                Method isRemovableMethod = storageVolumeClazz.getMethod("isRemovable");
+                //noinspection JavaReflectionMemberAccess
+                Method getVolumeStateMethod = StorageManager.class.getMethod("getVolumeState", String.class);
+                //noinspection JavaReflectionMemberAccess
+                Method getVolumeListMethod = StorageManager.class.getMethod("getVolumeList");
+                Object result = getVolumeListMethod.invoke(sm);
+                final int length = Array.getLength(result);
+                for (int i = 0; i < length; i++) {
+                    Object storageVolumeElement = Array.get(result, i);
+                    String path = (String) getPathMethod.invoke(storageVolumeElement);
+                    boolean isRemovable = (Boolean) isRemovableMethod.invoke(storageVolumeElement);
+                    String state = (String) getVolumeStateMethod.invoke(sm, path);
+                    paths.add(new SDCardInfo(path, new File(path).getName(), state, isRemovable));
+                }
+            } catch (ClassNotFoundException | IllegalAccessException | NoSuchMethodException |
+                     InvocationTargetException e) {
+                e.printStackTrace();
+            }
+        }
+        return paths;
+    }
+
 
 }

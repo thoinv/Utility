@@ -20,7 +20,6 @@ import androidx.documentfile.provider.DocumentFile;
 import android.text.TextUtils;
 import android.widget.Toast;
 
-import com.blankj.utilcode.util.SDCardUtils;
 import com.utility.DebugLog;
 import com.utility.R;
 import com.utility.SharedPreference;
@@ -94,35 +93,14 @@ public class FileUtils {
     public static List<SDCardInfo> getPathSDCard(Context context) {
         List<SDCardInfo> sdCardInfoList = new ArrayList<>();
         try {
-            if (Build.VERSION.SDK_INT >= 19) {
-                File[] cacheDirs = context.getExternalCacheDirs();
-                if (cacheDirs != null) {
-                    for (File file : cacheDirs) {
-                        if (!file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath())) {
-                            String cachePath = file.getPath();
-                            String sdCardPath = cachePath.substring(0, cachePath.indexOf("/Android/data/"));
-                            SDCardInfo storageItem = new SDCardInfo();
-                            storageItem.path = sdCardPath;
-                            storageItem.name = new File(sdCardPath).getName();
-                            storageItem.size = FileUtils.convertSizeFile(com.blankj.utilcode.util.FileUtils.getFsTotalSize(sdCardPath));
-
-                            sdCardInfoList.add(storageItem);
-                        }
-                    }
-                }
-            } else {
-                List<SDCardUtils.SDCardInfo> sdCards = SDCardUtils.getSDCardInfo();
-                if (sdCards.size() > 1) {
-                    for (SDCardUtils.SDCardInfo sdCardInfo : sdCards) {
-                        if (!sdCardInfo.getPath().startsWith(Environment.getExternalStorageDirectory().getPath())) {
-                            String sdCardPath = sdCardInfo.getPath();
-                            SDCardInfo storageItem = new SDCardInfo();
-                            storageItem.path = sdCardPath;
-                            storageItem.name = new File(sdCardPath).getName();
-                            storageItem.size = FileUtils.convertSizeFile(com.blankj.utilcode.util.FileUtils.getFsTotalSize(sdCardPath));
-
-                            sdCardInfoList.add(storageItem);
-                        }
+            File[] cacheDirs = context.getExternalCacheDirs();
+            if (cacheDirs != null) {
+                for (File file : cacheDirs) {
+                    if (!file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath())) {
+                        String cachePath = file.getPath();
+                        String sdCardPath = cachePath.substring(0, cachePath.indexOf("/Android/data/"));
+                        SDCardInfo storageItem = new SDCardInfo(sdCardPath, new File(sdCardPath).getName(), null, false);
+                        sdCardInfoList.add(storageItem);
                     }
                 }
             }
@@ -131,6 +109,7 @@ public class FileUtils {
         }
         return sdCardInfoList;
     }
+
 
     public static void openFile(Context context, File file) {
         Intent intent = new Intent();
@@ -1030,7 +1009,7 @@ public class FileUtils {
             List<SDCardInfo> sdCardInfoList = getPathSDCard(context);
             if (!sdCardInfoList.isEmpty()) {
                 for (SDCardInfo sdCardInfo : sdCardInfoList) {
-                    if (path.startsWith(sdCardInfo.path)) {
+                    if (path.startsWith(sdCardInfo.getPath())) {
                         return true;
                     }
                 }
@@ -1045,7 +1024,7 @@ public class FileUtils {
         try {
             boolean isSDCardUri = false;
             for (SDCardInfo sdCardInfo : getPathSDCard(context)) {
-                String sdCardUri = "content://com.android.externalstorage.documents/tree/" + sdCardInfo.name;
+                String sdCardUri = "content://com.android.externalstorage.documents/tree/" + sdCardInfo.getName();
                 if (treeUri.startsWith(sdCardUri)) {
                     isSDCardUri = true;
                     break;
@@ -1076,7 +1055,7 @@ public class FileUtils {
         if (sdCardInfoList.isEmpty()) {
             return false;
         }
-        String path = sdCardInfoList.get(0).path;
+        String path = sdCardInfoList.get(0).getPath();
         return isHavePermissionWithTreeUri(context, path);
     }
 
@@ -1101,8 +1080,8 @@ public class FileUtils {
         if (isExistSDCard(context) && isSDCardPath(context, path)) {
             List<SDCardInfo> sdCardInfoList = getPathSDCard(context);
             for (SDCardInfo sdCardInfo : sdCardInfoList) {
-                if (path.startsWith(sdCardInfo.path)) {
-                    return sdCardInfo.path;
+                if (path.startsWith(sdCardInfo.getPath())) {
+                    return sdCardInfo.getPath();
                 }
             }
         }
@@ -1111,9 +1090,7 @@ public class FileUtils {
 
     public static void requestTreeUriPermission(Context context) {
         try {
-            if (Build.VERSION.SDK_INT >= 21) {
-                ((Activity) context).startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_CODE_GRANT_URI_PERMISSION);
-            }
+            ((Activity) context).startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_CODE_GRANT_URI_PERMISSION);
         } catch (Exception e) {
             DebugLog.loge(e);
         }
@@ -1164,8 +1141,8 @@ public class FileUtils {
         try {
             List<SDCardInfo> sdCardInfoList = getPathSDCard(context);
             for (SDCardInfo sdCardInfo : sdCardInfoList) {
-                if (outputPath.startsWith(sdCardInfo.path)) {
-                    String sdcardName = sdCardInfo.name;
+                if (outputPath.startsWith(sdCardInfo.getPath())) {
+                    String sdcardName = sdCardInfo.getName();
                     int index = outputPath.indexOf(sdcardName);
                     String targetSDCard = "";
                     try {
@@ -1173,7 +1150,7 @@ public class FileUtils {
                     } catch (Exception e) {
                         DebugLog.loge(e);
                     }
-                    if (targetSDCard.length() > 0) {
+                    if (!targetSDCard.isEmpty()) {
                         targetSDCard = targetSDCard.substring(1).trim();
                     }
                     return targetSDCard;
